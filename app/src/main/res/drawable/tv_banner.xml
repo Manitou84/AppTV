@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Banner Leanback 320x180 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path android:fillColor="#0E1014" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#20242D" android:pathData="M110,50h100a10,10 0 0 1 10,10v60a10,10 0 0 1 -10,10h-100a10,10 0 0 1 -10,-10v-60a10,10 0 0 1 10,-10z" />
+    <path android:fillColor="#F2B13B" android:pathData="M148,70L178,90L148,110Z" />
+</vector>
