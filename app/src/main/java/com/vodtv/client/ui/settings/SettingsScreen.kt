@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -22,6 +24,7 @@ import androidx.tv.material3.Text
 import com.vodtv.client.data.repository.LibraryRepository
 import com.vodtv.client.data.repository.VodRepository
 import com.vodtv.client.data.settings.SettingsRepository
+import com.vodtv.client.data.tmdb.TmdbRepository
 import com.vodtv.client.ui.common.appViewModelFactory
 import com.vodtv.client.ui.common.toUserMessage
 import com.vodtv.client.ui.components.ButtonTextPadding
@@ -39,7 +42,9 @@ import kotlinx.coroutines.launch
 
 data class SettingsUiState(
     val baseUrl: String = "",
+    val sourceDomain: String = "",
     val iframeDomain: String = "",
+    val tmdbApiKey: String = "",
     val feedback: String? = null,
     val isError: Boolean = false,
     val busy: Boolean = false,
@@ -49,6 +54,7 @@ data class SettingsUiState(
 class SettingsViewModel(
     private val settings: SettingsRepository,
     private val vod: VodRepository,
+    private val tmdb: TmdbRepository,
     private val library: LibraryRepository,
 ) : ViewModel() {
 
@@ -58,37 +64,49 @@ class SettingsViewModel(
     init {
         viewModelScope.launch {
             val s = settings.current()
-            _state.update { it.copy(baseUrl = s.baseUrl, iframeDomain = s.iframeDomain) }
-        }
-    }
-
-    fun onBaseUrlChange(value: String) = _state.update { it.copy(baseUrl = value, feedback = null) }
-
-    fun onIframeChange(value: String) = _state.update { it.copy(iframeDomain = value, feedback = null) }
-
-    fun save() {
-        val s = _state.value
-        if (s.baseUrl.isBlank()) {
-            _state.update { it.copy(feedback = "Il Base URL è obbligatorio.", isError = true) }
-            return
-        }
-        viewModelScope.launch {
-            settings.update(s.baseUrl, s.iframeDomain)
-            val saved = settings.current()
             _state.update {
-                it.copy(baseUrl = saved.baseUrl, iframeDomain = saved.iframeDomain, feedback = "Impostazioni salvate.", isError = false)
+                it.copy(baseUrl = s.baseUrl, sourceDomain = s.sourceDomain, iframeDomain = s.iframeDomain, tmdbApiKey = s.tmdbApiKey)
             }
         }
     }
 
-    /** Salva e prova una ricerca reale sul server. */
+    fun onBaseUrlChange(value: String) = _state.update { it.copy(baseUrl = value, feedback = null) }
+    fun onSourceDomainChange(value: String) = _state.update { it.copy(sourceDomain = value, feedback = null) }
+    fun onIframeChange(value: String) = _state.update { it.copy(iframeDomain = value, feedback = null) }
+    fun onTmdbKeyChange(value: String) = _state.update { it.copy(tmdbApiKey = value, feedback = null) }
+
+    fun save() {
+        if (_state.value.baseUrl.isBlank()) {
+            _state.update { it.copy(feedback = "Il Base URL è obbligatorio.", isError = true) }
+            return
+        }
+        viewModelScope.launch {
+            persist()
+            _state.update { it.copy(feedback = "Impostazioni salvate.", isError = false) }
+        }
+    }
+
+    /** Salva, poi prova una ricerca reale sul server e (se impostata) la chiave TMDB. */
     fun verify() {
         viewModelScope.launch {
             _state.update { it.copy(busy = true, feedback = "Verifico…", isError = false) }
-            settings.update(_state.value.baseUrl, _state.value.iframeDomain)
-            vod.search("a")
-                .onSuccess { r -> _state.update { it.copy(busy = false, feedback = "Server raggiungibile: ${r.size} risultati di prova.", isError = false) } }
-                .onFailure { e -> _state.update { it.copy(busy = false, feedback = e.toUserMessage(), isError = true) } }
+            persist()
+            val server = vod.search("a").fold(
+                onSuccess = { "Server: ok (${it.size} risultati di prova)." to false },
+                onFailure = { "Server: ${it.toUserMessage()}" to true },
+            )
+            val key = _state.value.tmdbApiKey
+            val tmdbResult = if (key.isBlank()) {
+                "TMDB: chiave non impostata, uso i dati del server." to false
+            } else {
+                tmdb.checkKey(key).fold(
+                    onSuccess = { "TMDB: chiave valida." to false },
+                    onFailure = { "TMDB: chiave non valida o servizio non raggiungibile." to true },
+                )
+            }
+            _state.update {
+                it.copy(busy = false, feedback = "${server.first}\n${tmdbResult.first}", isError = server.second || tmdbResult.second)
+            }
         }
     }
 
@@ -104,9 +122,18 @@ class SettingsViewModel(
         }
     }
 
+    private suspend fun persist() {
+        val s = _state.value
+        settings.update(s.baseUrl, s.iframeDomain, s.sourceDomain, s.tmdbApiKey)
+        val saved = settings.current()
+        _state.update {
+            it.copy(baseUrl = saved.baseUrl, sourceDomain = saved.sourceDomain, iframeDomain = saved.iframeDomain, tmdbApiKey = saved.tmdbApiKey)
+        }
+    }
+
     companion object {
         val Factory = appViewModelFactory { c, _ ->
-            SettingsViewModel(c.settingsRepository, c.vodRepository, c.libraryRepository)
+            SettingsViewModel(c.settingsRepository, c.vodRepository, c.tmdbRepository, c.libraryRepository)
         }
     }
 }
@@ -122,37 +149,50 @@ fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 64.dp, vertical = 36.dp),
-        verticalArrangement = Arrangement.spacedBy(26.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         TopNavBar(current = NavTab.SETTINGS, onSelect = onSelectTab)
-        Text("Impostazioni", fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = VodColors.Text)
 
-        Column(Modifier.width(720.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                TvTextField(
-                    value = state.baseUrl,
-                    onValueChange = viewModel::onBaseUrlChange,
-                    label = "Base URL del server",
-                    placeholder = "http://server-vod.esempio",
-                    keyboardType = KeyboardType.Uri,
-                    imeAction = ImeAction.Next,
-                    modifier = Modifier.width(720.dp),
-                )
-                Text("Usato per /api/search, /api/load e /api/get_links", fontSize = 14.sp, color = VodColors.TextMuted)
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                TvTextField(
-                    value = state.iframeDomain,
-                    onValueChange = viewModel::onIframeChange,
-                    label = "Dominio iframe",
-                    placeholder = "dominio-iframe.esempio",
-                    keyboardType = KeyboardType.Uri,
-                    imeAction = ImeAction.Done,
-                    onImeAction = viewModel::save,
-                    modifier = Modifier.width(720.dp),
-                )
-                Text("Passato come iframe_domain e inviato come Referer al player", fontSize = 14.sp, color = VodColors.TextMuted)
-            }
+        // Scorre da sola quando il focus scende sui campi più in basso
+        Column(
+            modifier = Modifier
+                .width(760.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Text("Impostazioni", fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = VodColors.Text)
+
+            SettingField(
+                value = state.baseUrl,
+                onValueChange = viewModel::onBaseUrlChange,
+                label = "Base URL del server",
+                placeholder = "http://server-vod.esempio",
+                hint = "Il tuo backend: /api/search, /api/load e /api/get_links",
+            )
+            SettingField(
+                value = state.sourceDomain,
+                onValueChange = viewModel::onSourceDomainChange,
+                label = "Dominio sorgente di film e serie",
+                placeholder = "sito-sorgente.esempio",
+                hint = "Sito da cui il backend recupera i titoli; inviato come parametro \"domain\". Vuoto = predefinito del server",
+            )
+            SettingField(
+                value = state.iframeDomain,
+                onValueChange = viewModel::onIframeChange,
+                label = "Dominio iframe",
+                placeholder = "dominio-iframe.esempio",
+                hint = "Passato come iframe_domain a get_links e inviato come Referer al player",
+            )
+            SettingField(
+                value = state.tmdbApiKey,
+                onValueChange = viewModel::onTmdbKeyChange,
+                label = "Chiave API TMDB",
+                placeholder = "chiave v3 oppure Read Access Token v4",
+                hint = "Titoli, trame, locandine ed episodi in italiano da themoviedb.org (gratuita)",
+                keyboardType = KeyboardType.Ascii,
+                imeAction = ImeAction.Done,
+                onImeAction = viewModel::save,
+            )
 
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 PrimaryButton(onClick = viewModel::save) { Text("Salva", fontSize = 18.sp, modifier = ButtonTextPadding) }
@@ -166,7 +206,33 @@ fun SettingsScreen(
             state.feedback?.let {
                 Text(it, fontSize = 16.sp, color = if (state.isError) VodColors.Accent else VodColors.Watched)
             }
+            Text("OK apre la tastiera · ▼ passa al campo successivo", fontSize = 14.sp, color = VodColors.TextMuted)
         }
-        Text("OK apre la tastiera · ▼ passa al campo successivo", fontSize = 14.sp, color = VodColors.TextMuted)
+    }
+}
+
+@Composable
+private fun SettingField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    hint: String,
+    keyboardType: KeyboardType = KeyboardType.Uri,
+    imeAction: ImeAction = ImeAction.Next,
+    onImeAction: () -> Unit = {},
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        TvTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = label,
+            placeholder = placeholder,
+            keyboardType = keyboardType,
+            imeAction = imeAction,
+            onImeAction = onImeAction,
+            modifier = Modifier.width(720.dp),
+        )
+        Text(hint, fontSize = 14.sp, color = VodColors.TextMuted)
     }
 }

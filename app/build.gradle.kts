@@ -39,6 +39,11 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
+        // FilterChip e altri componenti tv-material sono ancora "experimental"
+        freeCompilerArgs.addAll(
+            "-opt-in=androidx.tv.material3.ExperimentalTvMaterial3Api",
+            "-opt-in=androidx.compose.ui.ExperimentalComposeUiApi",
+        )
     }
 }
 

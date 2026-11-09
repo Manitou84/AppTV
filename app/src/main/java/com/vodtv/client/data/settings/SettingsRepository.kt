@@ -14,8 +14,16 @@ import java.io.IOException
 
 private val Context.settingsStore by preferencesDataStore(name = "vod_settings")
 
-data class AppSettings(val baseUrl: String, val iframeDomain: String) {
+data class AppSettings(
+    val baseUrl: String,
+    val iframeDomain: String,
+    /** Dominio del sito da cui il backend recupera film e serie (inviato come parametro "domain"). */
+    val sourceDomain: String = "",
+    /** Chiave API v3 o token v4 (Read Access Token) di TMDB. */
+    val tmdbApiKey: String = "",
+) {
     val isConfigured: Boolean get() = baseUrl.isNotBlank()
+    val hasTmdb: Boolean get() = tmdbApiKey.isNotBlank()
 }
 
 class SettingsRepository(private val context: Context) {
@@ -23,6 +31,8 @@ class SettingsRepository(private val context: Context) {
     private object Keys {
         val BASE_URL = stringPreferencesKey("base_url")
         val IFRAME_DOMAIN = stringPreferencesKey("iframe_domain")
+        val SOURCE_DOMAIN = stringPreferencesKey("source_domain")
+        val TMDB_KEY = stringPreferencesKey("tmdb_api_key")
     }
 
     val settings: Flow<AppSettings> = context.settingsStore.data
@@ -31,15 +41,19 @@ class SettingsRepository(private val context: Context) {
             AppSettings(
                 baseUrl = prefs[Keys.BASE_URL].orEmpty(),
                 iframeDomain = prefs[Keys.IFRAME_DOMAIN].orEmpty(),
+                sourceDomain = prefs[Keys.SOURCE_DOMAIN].orEmpty(),
+                tmdbApiKey = prefs[Keys.TMDB_KEY].orEmpty(),
             )
         }
 
     suspend fun current(): AppSettings = settings.first()
 
-    suspend fun update(baseUrl: String, iframeDomain: String) {
+    suspend fun update(baseUrl: String, iframeDomain: String, sourceDomain: String, tmdbApiKey: String) {
         context.settingsStore.edit { prefs ->
             prefs[Keys.BASE_URL] = UrlUtils.normalizeBaseUrl(baseUrl)
-            prefs[Keys.IFRAME_DOMAIN] = iframeDomain.trim().trimEnd('/')
+            prefs[Keys.IFRAME_DOMAIN] = UrlUtils.normalizeDomain(iframeDomain)
+            prefs[Keys.SOURCE_DOMAIN] = UrlUtils.normalizeDomain(sourceDomain)
+            prefs[Keys.TMDB_KEY] = tmdbApiKey.trim()
         }
     }
 }

@@ -9,6 +9,12 @@ object UrlUtils {
         return if (hasScheme(trimmed)) trimmed else "http://$trimmed"
     }
 
+    /** "https://www.sito.esempio/" -> "www.sito.esempio" (solo host, come si aspetta il backend). */
+    fun normalizeDomain(raw: String): String =
+        raw.trim()
+            .replaceFirst(Regex("^https?://", RegexOption.IGNORE_CASE), "")
+            .trimEnd('/')
+
     /** Risolve percorsi di immagini relativi rispetto al Base URL. */
     fun resolve(baseUrl: String, path: String?): String? {
         if (path.isNullOrBlank()) return null

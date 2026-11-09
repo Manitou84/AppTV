@@ -32,13 +32,23 @@ data class ContentDetail(
     val tmdbId: String?,
     val type: ContentType,
     val seasons: List<Season>,
+    /** Arricchimenti da TMDB (vuoti se TMDB non è configurato). */
+    val genres: List<String> = emptyList(),
+    val rating: Double? = null,
+    val runtimeMin: Int? = null,
 ) {
     val isSeries: Boolean get() = type == ContentType.SERIES
 }
 
 data class Season(val number: Int, val name: String, val episodes: List<Episode>)
 
-data class Episode(val number: Int, val name: String, val plot: String?, val image: String?)
+data class Episode(
+    val number: Int,
+    val name: String,
+    val plot: String?,
+    val image: String?,
+    val runtimeMin: Int? = null,
+)
 
 /** Un flusso restituito da /api/get_links (etichetta = percorso della chiave nel JSON). */
 data class StreamLink(val label: String, val url: String)

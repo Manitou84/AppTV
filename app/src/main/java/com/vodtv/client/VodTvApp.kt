@@ -10,6 +10,7 @@ import com.vodtv.client.data.repository.LibraryRepository
 import com.vodtv.client.data.repository.VodRepository
 import com.vodtv.client.data.rsi.RsiRepository
 import com.vodtv.client.data.settings.SettingsRepository
+import com.vodtv.client.data.tmdb.TmdbRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,7 +24,8 @@ class AppContainer(context: Context) {
 
     val settingsRepository = SettingsRepository(context)
     val libraryRepository = LibraryRepository(database, applicationScope)
-    val vodRepository = VodRepository(VodApiService(httpClient), settingsRepository, libraryRepository)
+    val tmdbRepository = TmdbRepository(httpClient, settingsRepository)
+    val vodRepository = VodRepository(VodApiService(httpClient), settingsRepository, libraryRepository, tmdbRepository)
     val rsiRepository = RsiRepository(httpClient)
     val playbackSessionStore = PlaybackSessionStore()
 }

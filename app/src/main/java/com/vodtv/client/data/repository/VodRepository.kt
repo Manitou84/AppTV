@@ -11,6 +11,7 @@ import com.vodtv.client.data.remote.VodApiService
 import com.vodtv.client.data.remote.VodJsonParser
 import com.vodtv.client.data.settings.AppSettings
 import com.vodtv.client.data.settings.SettingsRepository
+import com.vodtv.client.data.tmdb.TmdbRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -26,22 +27,26 @@ class VodRepository(
     private val api: VodApiService,
     private val settings: SettingsRepository,
     private val library: LibraryRepository,
+    private val tmdb: TmdbRepository,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     /** Limita le chiamate /api/load fatte in background per classificare i risultati. */
     private val classifySemaphore = Semaphore(permits = 3)
 
     suspend fun search(query: String): Result<List<SearchResult>> = runApi { s ->
-        val results = VodJsonParser.parseSearch(api.search(s.baseUrl, query), s.baseUrl)
+        val results = VodJsonParser.parseSearch(api.search(s.baseUrl, query, s.sourceDomain), s.baseUrl)
         // Applica i tipi già noti (dal backend o dalla cache locale)
         val known = library.knownTypes(results.filter { it.type == ContentType.UNKNOWN }.map { it.slug })
         results.forEach { if (it.type != ContentType.UNKNOWN) library.rememberType(it.slug, it.type) }
         results.map { r -> if (r.type == ContentType.UNKNOWN) r.copy(type = known[r.slug] ?: ContentType.UNKNOWN) else r }
     }
 
-    suspend fun load(slug: String): Result<ContentDetail> = runApi { s ->
-        VodJsonParser.parseDetail(api.load(s.baseUrl, slug), slug, s.baseUrl)
-            .also { library.rememberType(slug, it.type) }
+    /** Dettaglio dal backend, arricchito con TMDB (se c'è tmdb_id e la chiave è impostata). */
+    suspend fun load(slug: String, enrich: Boolean = true): Result<ContentDetail> = runApi { s ->
+        val base = VodJsonParser.parseDetail(api.load(s.baseUrl, slug, s.sourceDomain), slug, s.baseUrl)
+        val detail = if (enrich) tmdb.enrich(base) else base
+        library.rememberType(slug, detail.type)
+        detail
     }
 
     /**
@@ -51,7 +56,8 @@ class VodRepository(
     suspend fun classify(slug: String): ContentType {
         library.knownTypes(listOf(slug))[slug]?.let { return it }
         return classifySemaphore.withPermit {
-            load(slug).getOrNull()?.type ?: ContentType.UNKNOWN
+            // Senza TMDB: qui basta il tipo, non serve arricchire
+            load(slug, enrich = false).getOrNull()?.type ?: ContentType.UNKNOWN
         }
     }
 

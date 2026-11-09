@@ -8,7 +8,7 @@ App nativa per Android TV / Google TV, controllabile interamente dal telecomando
 2. Lascia fare il *Gradle Sync*: scarica dipendenze e SDK 35.
 3. Avvia su un emulatore **Android TV** (API 26+) o su un dispositivo collegato via ADB
    (`adb connect <ip-della-tv>`, con il debug di rete attivo nelle Opzioni sviluppatore).
-4. Al primo avvio vai in **Impostazioni**: inserisci *Base URL* e *Dominio iframe*, poi *Verifica connessione*.
+4. Al primo avvio vai in **Impostazioni**: inserisci *Base URL*, *Dominio sorgente*, *Dominio iframe* e la *Chiave API TMDB*, poi *Verifica connessione*.
 
 > Il codice non è stato compilato nell'ambiente in cui è stato scritto (manca l'SDK Android).
 > Se il sync segnala versioni non allineate (AGP / Kotlin / KSP), aggiornale in `build.gradle.kts` della radice
@@ -54,6 +54,8 @@ app/src/main/java/com/vodtv/client/
 | Episodio successivo | A fine episodio: riquadro con conto alla rovescia di 10 s; *Annulla* chiude. |
 | Player | ◀ ▶ ±10 s · OK pausa · tasti media · Indietro chiude prima i controlli, poi il player. |
 | Sorgenti multiple | Se `get_links` restituisce più flussi compare la scelta (saltata con un solo flusso). |
+| TMDB | Con `tmdb_id` e chiave impostata, il Dettaglio usa titolo, trama, locandina, sfondo, generi, voto e durate in italiano da TMDB; episodi con nome, trama e durata. Senza chiave restano i dati del backend. |
+| Dominio sorgente | Inviato come parametro `domain` a `/api/search` e `/api/load` (nome modificabile in `VodApiService.SOURCE_DOMAIN_PARAM`). |
 | Motori (RSI) | Dirette, palinsesto e archivio filtrati per sport. L'app chiede alla RSI il flusso e lo riproduce solo se la RSI lo concede; altrimenti mostra il motivo (es. "Solo in Svizzera"). |
 
 ## Contratto del backend VOD

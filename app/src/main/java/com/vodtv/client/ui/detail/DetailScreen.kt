@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,6 +57,7 @@ import com.vodtv.client.ui.components.PrimaryButton
 import com.vodtv.client.ui.components.ProgressLine
 import com.vodtv.client.ui.components.SecondaryButton
 import com.vodtv.client.ui.theme.VodColors
+import java.util.Locale
 
 @Composable
 fun DetailScreen(
@@ -85,6 +87,30 @@ fun DetailScreen(
 private fun DetailContent(detail: ContentDetail, state: DetailUiState, viewModel: DetailViewModel) {
     val playFocus = remember { FocusRequester() }
 
+    // Sfondo TMDB sfumato verso il nero, dietro a tutto il contenuto
+    detail.backdrop?.let { backdrop ->
+        Box(Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = backdrop,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                alpha = 0.35f,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            0f to VodColors.Ground,
+                            0.55f to VodColors.Ground.copy(alpha = 0.85f),
+                            1f to VodColors.Ground.copy(alpha = 0.3f),
+                        ),
+                    ),
+            )
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -112,9 +138,14 @@ private fun DetailContent(detail: ContentDetail, state: DetailUiState, viewModel
                 add(if (detail.isSeries) "SERIE TV" else "FILM")
                 detail.year?.let { add(it) }
                 if (detail.isSeries) add("${detail.seasons.size} stagioni")
+                if (!detail.isSeries) detail.runtimeMin?.let { add(formatRuntime(it)) }
+                detail.rating?.let { add("★ " + String.format(Locale.ITALY, "%.1f", it)) }
             }.joinToString(" · ")
             Text(kicker, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = VodColors.TextMuted, letterSpacing = 1.4.sp)
             Text(detail.title, fontSize = 44.sp, fontWeight = FontWeight.Bold, color = VodColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (detail.genres.isNotEmpty()) {
+                Text(detail.genres.take(4).joinToString(" · "), fontSize = 16.sp, color = VodColors.TextSoft)
+            }
             detail.plot?.let {
                 Text(
                     it,
@@ -253,12 +284,16 @@ private fun EpisodeList(state: DetailUiState, viewModel: DetailViewModel) {
                     when {
                         watched -> Text("✓ Visto", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = VodColors.Watched)
                         inProgress -> Text(formatRemaining(progress!!.remainingMs), fontSize = 14.sp, color = VodColors.TextSoft)
+                        episode.runtimeMin != null -> Text("${episode.runtimeMin} min", fontSize = 14.sp, color = VodColors.TextMuted)
                     }
                 },
             )
         }
     }
 }
+
+private fun formatRuntime(minutes: Int): String =
+    if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
 
 /** Scelta del flusso quando get_links ne restituisce più di uno. */
 @Composable
