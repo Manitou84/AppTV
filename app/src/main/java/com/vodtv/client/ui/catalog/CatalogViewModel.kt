@@ -28,12 +28,17 @@ data class CatalogUiState(
     val error: String? = null,
     val hasSearched: Boolean = false,
     val isConfigured: Boolean = true,
-    /** Quanti risultati stiamo ancora classificando come film/serie. */
+    /** Quanti risultati stiamo ancora classificando (o verificando per i bambini). */
     val classifying: Int = 0,
+    /** Profilo bambini: si vedono solo i titoli verificati con TMDB. */
+    val kidMode: Boolean = false,
+    val kidAllowed: Set<String> = emptySet(),
+    val kidNeedsTmdb: Boolean = false,
 ) {
-    /** In "Film" mostriamo film + non ancora classificati; idem per "Serie TV". */
+    /** In "Film" mostriamo film + non ancora classificati; idem per "Serie TV". Bambini: solo i verificati. */
     fun visibleFor(target: ContentType): List<SearchResult> =
         items.filter { it.type == target || it.type == ContentType.UNKNOWN }
+            .filter { !kidMode || it.slug in kidAllowed }
 }
 
 /**
@@ -47,9 +52,10 @@ class CatalogViewModel(
     private val target: ContentType,
     private val vod: VodRepository,
     settings: SettingsRepository,
+    private val kidMode: Boolean,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(CatalogUiState())
+    private val _state = MutableStateFlow(CatalogUiState(kidMode = kidMode))
     val state: StateFlow<CatalogUiState> = _state.asStateFlow()
 
     private val queryInput = MutableStateFlow("")
@@ -61,7 +67,9 @@ class CatalogViewModel(
 
     init {
         viewModelScope.launch {
-            settings.settings.collect { s -> _state.update { it.copy(isConfigured = s.isConfigured) } }
+            settings.settings.collect { s ->
+                _state.update { it.copy(isConfigured = s.isConfigured, kidNeedsTmdb = kidMode && !s.hasTmdb) }
+            }
         }
         viewModelScope.launch {
             queryInput
@@ -97,7 +105,7 @@ class CatalogViewModel(
             _state.update { it.copy(isLoading = true, error = null) }
             vod.search(query)
                 .onSuccess { results ->
-                    _state.update { it.copy(isLoading = false, hasSearched = true, items = results) }
+                    _state.update { it.copy(isLoading = false, hasSearched = true, items = results, kidAllowed = emptySet()) }
                     lastFocusedSlug = null
                     classifyUnknown(results)
                 }
@@ -111,6 +119,10 @@ class CatalogViewModel(
 
     /** Figlia del job di ricerca: una nuova ricerca annulla anche le classificazioni in corso. */
     private suspend fun classifyUnknown(results: List<SearchResult>) = coroutineScope {
+        if (kidMode) {
+            checkForKids(results)
+            return@coroutineScope
+        }
         val unknown = results.filter { it.type == ContentType.UNKNOWN }
         if (unknown.isEmpty()) return@coroutineScope
         _state.update { it.copy(classifying = unknown.size) }
@@ -127,12 +139,30 @@ class CatalogViewModel(
         }
     }
 
+    /** Bambini: ogni risultato viene aperto con TMDB e mostrato solo se adatto (KidPolicy). */
+    private suspend fun checkForKids(results: List<SearchResult>) = coroutineScope {
+        if (results.isEmpty()) return@coroutineScope
+        _state.update { it.copy(classifying = results.size) }
+        results.forEach { result ->
+            launch {
+                val (type, safe) = vod.inspectForKids(result.slug)
+                _state.update { s ->
+                    s.copy(
+                        items = s.items.map { if (it.slug == result.slug && type != ContentType.UNKNOWN) it.copy(type = type) else it },
+                        kidAllowed = if (safe) s.kidAllowed + result.slug else s.kidAllowed,
+                        classifying = (s.classifying - 1).coerceAtLeast(0),
+                    )
+                }
+            }
+        }
+    }
+
     companion object {
         private const val DEBOUNCE_MS = 600L
         private const val MIN_QUERY_LENGTH = 2
 
         fun factory(target: ContentType) = appViewModelFactory { c, _ ->
-            CatalogViewModel(target, c.vodRepository, c.settingsRepository)
+            CatalogViewModel(target, c.vodRepository, c.settingsRepository, kidMode = c.profileRepository.active.value?.isKid == true)
         }
     }
 }

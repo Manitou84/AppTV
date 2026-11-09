@@ -79,7 +79,10 @@ class TmdbRepository(
 
     private suspend fun merge(detail: ContentDetail, kind: ContentType, info: JsonObject, key: String): ContentDetail {
         val isSeries = kind == ContentType.SERIES || detail.seasons.isNotEmpty()
-        val genres = (info["genres"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.str("name") }
+        val genreObjects = (info["genres"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+        val genres = genreObjects.mapNotNull { it.str("name") }
+        val genreIds = genreObjects.mapNotNull { it.int("id") }
+        val adult = (info["adult"] as? JsonPrimitive)?.content == "true"
         val runtime = info.int("runtime")
             ?: (info["episode_run_time"] as? JsonArray)?.firstOrNull()?.let { (it as? JsonPrimitive)?.content?.toIntOrNull() }
         val rating = (info["vote_average"] as? JsonPrimitive)?.doubleOrNull?.takeIf { it > 0 }
@@ -97,6 +100,9 @@ class TmdbRepository(
             genres = genres,
             rating = rating,
             runtimeMin = runtime?.takeIf { it > 0 },
+            genreIds = genreIds,
+            adult = adult,
+            tmdbEnriched = true,
         )
     }
 

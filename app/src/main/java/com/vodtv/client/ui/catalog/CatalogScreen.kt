@@ -82,6 +82,7 @@ fun CatalogScreen(
             )
             Button(onClick = viewModel::submit) { Text("Cerca") }
             val status = when {
+                state.classifying > 0 && state.kidMode -> "Cerco i titoli adatti ai bambini… (${state.classifying})"
                 state.classifying > 0 -> "Riconosco film e serie… (${state.classifying})"
                 state.hasSearched && !state.isLoading -> "${visible.size} titoli"
                 else -> ""
@@ -95,10 +96,20 @@ fun CatalogScreen(
                 actionLabel = "Apri Impostazioni",
                 onAction = { onSelectTab(NavTab.SETTINGS) },
             )
+            state.kidNeedsTmdb -> MessagePanel(
+                "Il profilo bambini mostra solo titoli verificati con TMDB. " +
+                    "Chiedi a un adulto di inserire la chiave TMDB per questo profilo in Impostazioni.",
+            )
             state.isLoading && state.items.isEmpty() -> LoadingBox()
             state.error != null -> MessagePanel(state.error!!, actionLabel = "Riprova", onAction = viewModel::retry)
             state.hasSearched && visible.isEmpty() && state.classifying == 0 ->
-                MessagePanel(if (isMovies) "Nessun film trovato." else "Nessuna serie trovata.")
+                MessagePanel(
+                    when {
+                        state.kidMode -> "Nessun titolo adatto ai bambini per questa ricerca."
+                        isMovies -> "Nessun film trovato."
+                        else -> "Nessuna serie trovata."
+                    },
+                )
             !state.hasSearched -> MessagePanel(
                 if (isMovies) "Cerca un film: premi OK sul campo per aprire la tastiera."
                 else "Cerca una serie: premi OK sul campo per aprire la tastiera.",

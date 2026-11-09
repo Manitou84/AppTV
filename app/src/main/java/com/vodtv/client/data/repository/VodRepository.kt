@@ -2,6 +2,7 @@ package com.vodtv.client.data.repository
 
 import com.vodtv.client.data.model.ContentDetail
 import com.vodtv.client.data.model.ContentType
+import com.vodtv.client.data.model.KidPolicy
 import com.vodtv.client.data.model.NoStreamException
 import com.vodtv.client.data.model.NotConfiguredException
 import com.vodtv.client.data.model.SearchResult
@@ -18,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Repository di rete verso il backend VOD.
@@ -32,8 +34,10 @@ class VodRepository(
 ) {
     /** Limita le chiamate /api/load fatte in background per classificare i risultati. */
     private val classifySemaphore = Semaphore(permits = 3)
+    private val kidCache = ConcurrentHashMap<String, Pair<ContentType, Boolean>>()
 
-    suspend fun search(query: String): Result<List<SearchResult>> = runApi { s ->
+    /** [override]: impostazioni di un profilo diverso dall'attivo (pulsante "Verifica" nelle Impostazioni). */
+    suspend fun search(query: String, override: AppSettings? = null): Result<List<SearchResult>> = runApi(override) { s ->
         val results = VodJsonParser.parseSearch(api.search(s.baseUrl, query, s.sourceDomain), s.baseUrl)
         // Applica i tipi già noti (dal backend o dalla cache locale)
         val known = library.knownTypes(results.filter { it.type == ContentType.UNKNOWN }.map { it.slug })
@@ -61,6 +65,18 @@ class VodRepository(
         }
     }
 
+    /**
+     * Profilo bambini: carica il dettaglio con TMDB e applica [KidPolicy]. Risultato in cache.
+     * Restituisce anche il tipo, così la stessa chiamata classifica film/serie.
+     */
+    suspend fun inspectForKids(slug: String): Pair<ContentType, Boolean> {
+        kidCache[slug]?.let { return it }
+        return classifySemaphore.withPermit {
+            val d = load(slug, enrich = true).getOrNull() ?: return@withPermit ContentType.UNKNOWN to false
+            (d.type to KidPolicy.isKidSafe(d)).also { kidCache[slug] = it }
+        }
+    }
+
     suspend fun getLinks(tmdbId: String, season: Int?, episode: Int?): Result<List<StreamLink>> = runApi { s ->
         require(s.iframeDomain.isNotBlank()) { "Dominio iframe non configurato: impostalo nelle Impostazioni." }
         val links = VodJsonParser.parseLinks(api.getLinks(s.baseUrl, s.iframeDomain, tmdbId, season, episode))
@@ -74,8 +90,8 @@ class VodRepository(
         return mapOf("Referer" to referer, "Origin" to referer.trimEnd('/'))
     }
 
-    private suspend fun <T> runApi(block: suspend (AppSettings) -> T): Result<T> = withContext(io) {
-        val s = settings.current()
+    private suspend fun <T> runApi(override: AppSettings? = null, block: suspend (AppSettings) -> T): Result<T> = withContext(io) {
+        val s = override ?: settings.current()
         if (!s.isConfigured) return@withContext Result.failure(NotConfiguredException())
         try {
             Result.success(block(s))

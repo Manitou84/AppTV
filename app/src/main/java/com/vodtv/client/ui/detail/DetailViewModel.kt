@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vodtv.client.data.model.ContentDetail
 import com.vodtv.client.data.model.Episode
+import com.vodtv.client.data.model.KidPolicy
 import com.vodtv.client.data.model.MissingTmdbIdException
 import com.vodtv.client.data.model.Origin
 import com.vodtv.client.data.model.ProgressKeys
@@ -44,6 +45,8 @@ data class DetailUiState(
     val isResolving: Boolean = false,
     val playError: String? = null,
     val linkChoices: List<StreamLink>? = null,
+    /** Profilo bambini e titolo non adatto (o non verificabile con TMDB). */
+    val kidBlocked: Boolean = false,
 ) {
     val selectedSeason: Season? get() = detail?.seasons?.getOrNull(selectedSeasonIndex)
 
@@ -58,6 +61,7 @@ class DetailViewModel(
     private val vod: VodRepository,
     private val library: LibraryRepository,
     private val sessions: PlaybackSessionStore,
+    private val kidMode: Boolean,
 ) : ViewModel() {
 
     private val slug: String = checkNotNull(savedStateHandle["slug"])
@@ -91,7 +95,11 @@ class DetailViewModel(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             vod.load(slug)
-                .onSuccess { d -> _state.update { it.copy(isLoading = false, detail = d) }; recomputeResume() }
+                .onSuccess { d ->
+                    val blocked = kidMode && !KidPolicy.isKidSafe(d)
+                    _state.update { it.copy(isLoading = false, detail = d, kidBlocked = blocked) }
+                    recomputeResume()
+                }
                 .onFailure { e -> _state.update { it.copy(isLoading = false, error = e.toUserMessage()) } }
         }
     }
@@ -137,6 +145,7 @@ class DetailViewModel(
     }
 
     private fun startPlayback(season: Int?, episode: Int?, resumeFromMs: Long) {
+        if (_state.value.kidBlocked) return
         val d = _state.value.detail ?: return
         if (_state.value.isResolving) return
         val tmdb = d.tmdbId
@@ -271,7 +280,10 @@ class DetailViewModel(
 
     companion object {
         val Factory = appViewModelFactory { c, handle ->
-            DetailViewModel(handle, c.vodRepository, c.libraryRepository, c.playbackSessionStore)
+            DetailViewModel(
+                handle, c.vodRepository, c.libraryRepository, c.playbackSessionStore,
+                kidMode = c.profileRepository.active.value?.isKid == true,
+            )
         }
     }
 }

@@ -36,8 +36,24 @@ data class ContentDetail(
     val genres: List<String> = emptyList(),
     val rating: Double? = null,
     val runtimeMin: Int? = null,
+    val genreIds: List<Int> = emptyList(),
+    val adult: Boolean = false,
+    /** true se i dati TMDB sono stati caricati (serve al filtro bambini). */
+    val tmdbEnriched: Boolean = false,
 ) {
     val isSeries: Boolean get() = type == ContentType.SERIES
+}
+
+/**
+ * Regola del profilo bambini: solo titoli riconosciuti da TMDB come animazione, famiglia o kids,
+ * non per adulti e senza generi da adulti. Senza dati TMDB il titolo è escluso (scelta prudente).
+ */
+object KidPolicy {
+    private val ALLOWED = setOf(16, 10751, 10762)          // Animazione, Famiglia, Kids
+    private val BLOCKED = setOf(27, 53, 80, 10752, 10768)  // Horror, Thriller, Crime, Guerra, War & Politics
+
+    fun isKidSafe(d: ContentDetail): Boolean =
+        d.tmdbEnriched && !d.adult && d.genreIds.any { it in ALLOWED } && d.genreIds.none { it in BLOCKED }
 }
 
 data class Season(val number: Int, val name: String, val episodes: List<Episode>)

@@ -75,6 +75,7 @@ fun DetailScreen(
         when {
             state.isLoading && detail == null -> LoadingBox()
             detail == null -> MessagePanel(state.error ?: "Errore", actionLabel = "Riprova", onAction = viewModel::load)
+            state.kidBlocked -> MessagePanel("«${detail.title}» non è disponibile nel profilo bambini.")
             else -> DetailContent(detail = detail, state = state, viewModel = viewModel)
         }
         state.linkChoices?.let { links ->

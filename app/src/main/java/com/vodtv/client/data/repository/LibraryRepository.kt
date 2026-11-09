@@ -9,45 +9,61 @@ import com.vodtv.client.data.model.Favorite
 import com.vodtv.client.data.model.Origin
 import com.vodtv.client.data.model.WatchProgress
 import com.vodtv.client.data.playback.PlaybackSession
+import com.vodtv.client.data.profile.ProfileRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * Dati personali salvati sulla TV: preferiti, avanzamento di visione, classificazione film/serie.
+ * Dati personali salvati sulla TV, separati per profilo: preferiti e avanzamento di visione.
+ * Tutti i flussi seguono il profilo attivo: cambiando profilo cambiano da soli.
  * appScope sopravvive alle schermate: un salvataggio lanciato all'uscita dal player non viene annullato.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class LibraryRepository(
     db: AppDatabase,
+    private val profiles: ProfileRepository,
     private val appScope: CoroutineScope,
 ) {
     private val favoriteDao = db.favoriteDao()
     private val progressDao = db.watchProgressDao()
     private val knownDao = db.knownTitleDao()
 
+    private val activeId: Flow<String> = profiles.active.filterNotNull().map { it.id }.distinctUntilChanged()
+
+    private suspend fun currentId(): String = profiles.awaitActive().id
+
     // ---------- Preferiti ----------
 
-    val favorites: Flow<List<Favorite>> = favoriteDao.observeAll().map { list ->
-        list.map { Favorite(it.slug, it.title, it.image, ContentType.fromStored(it.type), it.addedAt) }
+    val favorites: Flow<List<Favorite>> = activeId.flatMapLatest { id ->
+        favoriteDao.observeAll(id).map { list ->
+            list.map { Favorite(it.slug, it.title, it.image, ContentType.fromStored(it.type), it.addedAt) }
+        }
     }
 
-    fun isFavorite(slug: String): Flow<Boolean> = favoriteDao.observeIsFavorite(slug)
+    fun isFavorite(slug: String): Flow<Boolean> = activeId.flatMapLatest { favoriteDao.observeIsFavorite(it, slug) }
 
     suspend fun setFavorite(slug: String, title: String, image: String?, type: ContentType, favorite: Boolean) {
+        val id = currentId()
         if (favorite) {
-            favoriteDao.upsert(FavoriteEntity(slug, title, image, type.name, System.currentTimeMillis()))
+            favoriteDao.upsert(FavoriteEntity(id, slug, title, image, type.name, System.currentTimeMillis()))
         } else {
-            favoriteDao.delete(slug)
+            favoriteDao.delete(id, slug)
         }
     }
 
     // ---------- Avanzamento di visione ----------
 
-    fun progressForOwner(ownerId: String): Flow<Map<String, WatchProgress>> =
-        progressDao.observeForOwner(ownerId).map { list -> list.associate { it.id to it.toModel() } }
+    fun progressForOwner(ownerId: String): Flow<Map<String, WatchProgress>> = activeId.flatMapLatest { id ->
+        progressDao.observeForOwner(id, ownerId).map { list -> list.associate { it.id to it.toModel() } }
+    }
 
-    suspend fun progress(id: String): WatchProgress? = progressDao.get(id)?.toModel()
+    suspend fun progress(id: String): WatchProgress? = progressDao.get(currentId(), id)?.toModel()
 
     /**
      * "Continua a guardare": per ogni titolo l'ultima cosa vista.
@@ -55,28 +71,32 @@ class LibraryRepository(
      * - serie con ultimo episodio finito -> resta in lista (il Dettaglio propone il successivo)
      * - film finiti -> esclusi
      */
-    val continueWatching: Flow<List<WatchProgress>> = progressDao.observeAll().map { list ->
-        list.map { it.toModel() }
-            .groupBy { it.ownerId }
-            .mapNotNull { (_, entries) -> entries.maxByOrNull { it.updatedAt } }
-            .filter { p ->
-                when {
-                    !p.watched -> p.positionMs >= MIN_RESUME_MS
-                    else -> p.type == ContentType.SERIES
+    val continueWatching: Flow<List<WatchProgress>> = activeId.flatMapLatest { id ->
+        progressDao.observeAll(id).map { list ->
+            list.map { it.toModel() }
+                .groupBy { it.ownerId }
+                .mapNotNull { (_, entries) -> entries.maxByOrNull { it.updatedAt } }
+                .filter { p ->
+                    when {
+                        !p.watched -> p.positionMs >= MIN_RESUME_MS
+                        else -> p.type == ContentType.SERIES
+                    }
                 }
-            }
-            .sortedByDescending { it.updatedAt }
-            .take(MAX_CONTINUE_WATCHING)
+                .sortedByDescending { it.updatedAt }
+                .take(MAX_CONTINUE_WATCHING)
+        }
     }
 
     /** Salvataggio periodico dal player. Visto = oltre il 90% della durata (titoli di coda esclusi). */
     fun saveProgressAsync(session: PlaybackSession, positionMs: Long, durationMs: Long) {
         if (session.isLive || durationMs <= 0) return
+        val profileId = profiles.active.value?.id ?: return
         appScope.launch {
-            val previous = progressDao.get(session.progressKey)
+            val previous = progressDao.get(profileId, session.progressKey)
             val reachedEnd = positionMs >= durationMs * WATCHED_THRESHOLD
             progressDao.upsert(
                 WatchProgressEntity(
+                    profileId = profileId,
                     id = session.progressKey,
                     ownerId = session.ownerId,
                     origin = session.origin.name,
@@ -107,9 +127,11 @@ class LibraryRepository(
         episode: Int?,
         watched: Boolean,
     ) {
-        val previous = progressDao.get(id)
+        val profileId = currentId()
+        val previous = progressDao.get(profileId, id)
         progressDao.upsert(
             WatchProgressEntity(
+                profileId = profileId,
                 id = id,
                 ownerId = ownerId,
                 origin = Origin.VOD.name,
@@ -127,7 +149,7 @@ class LibraryRepository(
         )
     }
 
-    suspend fun clearHistory() = progressDao.clear()
+    suspend fun clearHistory(profileId: String) = progressDao.clear(profileId)
 
     // ---------- Classificazione film / serie ----------
 
