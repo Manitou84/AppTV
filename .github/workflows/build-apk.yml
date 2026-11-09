@@ -33,6 +33,21 @@ jobs:
           name: VodTv-apk
           path: app/build/outputs/apk/debug/app-debug.apk
 
+      # Copia pubblica senza login: ramo "apk" con il solo file app.apk
+      #   https://raw.githubusercontent.com/<repo>/apk/app.apk
+      #   https://cdn.jsdelivr.net/gh/<repo>@apk/app.apk
+      - name: Pubblica l'APK sul ramo "apk"
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir out
+          cp app/build/outputs/apk/debug/app-debug.apk out/app.apk
+          cd out
+          git init -q -b apk
+          git add app.apk
+          git -c user.name="github-actions" -c user.email="actions@github.com" commit -q -m "APK ${GITHUB_SHA::7}"
+          git push -f -q "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" apk
+          curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@apk/app.apk" > /dev/null || true
+
       - name: Pubblica nella release "latest"
         uses: softprops/action-gh-release@v2
         with:
