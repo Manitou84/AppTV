@@ -4,6 +4,9 @@ name: Build APK
 
 on:
   push:
+    paths-ignore:
+      - "mac/**"
+      - ".github/workflows/build-mac.yml"
   workflow_dispatch:
 
 permissions:

@@ -1,0 +1,62 @@
+# Compila VOD.app (universale Intel + Apple Silicon) sui Mac di GitHub e la pubblica nella release
+# "mac-latest" insieme a version.json, che il programma legge per proporre gli aggiornamenti.
+name: Build Mac
+
+on:
+  push:
+    paths:
+      - "mac/**"
+      - ".github/workflows/build-mac.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python universale da python.org
+        run: |
+          curl -sSLo py.pkg https://www.python.org/ftp/python/3.12.8/python-3.12.8-macos11.pkg
+          sudo installer -pkg py.pkg -target /
+          echo "PY=/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12" >> "$GITHUB_ENV"
+
+      - name: Numero di versione
+        run: |
+          V=$(TZ=Europe/Rome date +%Y.%m.%d-%H%M)
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          echo "VERSION = \"$V\"" > mac/app/version.py
+
+      - name: Dipendenze
+        run: |
+          "$PY" -m venv venv
+          venv/bin/pip install --upgrade pip
+          venv/bin/pip install pywebview py2app certifi
+
+      - name: Compila VOD.app
+        working-directory: mac
+        run: ../venv/bin/python setup.py py2app
+
+      - name: Firma ad-hoc (necessaria su Apple Silicon) e zip
+        run: |
+          codesign --force --deep --sign - mac/dist/VOD.app
+          codesign --verify --deep mac/dist/VOD.app
+          lipo -archs mac/dist/VOD.app/Contents/MacOS/VOD
+          ditto -c -k --keepParent mac/dist/VOD.app VOD-mac.zip
+          NOTES=$(git log -1 --pretty=%s | sed 's/\\/\\\\/g; s/"/\\"/g')
+          printf '{"version": "%s", "notes": "%s"}\n' "$VERSION" "$NOTES" > version.json
+          cat version.json
+
+      - name: Pubblica nella release "mac-latest"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mac-latest
+          name: VOD per Mac
+          prerelease: true
+          make_latest: false
+          files: |
+            VOD-mac.zip
+            version.json
