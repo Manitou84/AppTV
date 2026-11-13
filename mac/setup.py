@@ -15,7 +15,7 @@ OPTIONS = {
     "argv_emulation": False,
     "arch": "universal2",                       # Intel e Apple Silicon
     "includes": ["WebKit", "Foundation", "webview", "server", "db", "net", "vod_api", "tmdb", "rsi",
-                 "hls_proxy", "updater", "version"],
+                 "hls_proxy", "updater", "version", "library_backend"],
     "packages": ["webview", "certifi"],
     "resources": ["app/web"],
     "plist": {

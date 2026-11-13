@@ -107,8 +107,6 @@ class VodClient:
         }
 
     def get_links(self, tmdb_id, season=None, episode=None):
-        if not self.iframe:
-            raise net.HttpError(0, "Dominio iframe non configurato: impostalo nelle Impostazioni.")
         root = net.get_json(f"{self.base}/api/get_links", {
             "iframe_domain": self.iframe, "tmdb_id": tmdb_id, "season": season, "episode": episode,
         }, timeout=45)

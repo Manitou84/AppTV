@@ -7,6 +7,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+import library_backend  # noqa: E402
 import server   # noqa: E402
 import updater  # noqa: E402
 from version import VERSION  # noqa: E402
@@ -26,6 +27,18 @@ def data_dir():
     return d
 
 
+def start_library():
+    """Backend della libreria (cartella ~/Movies/VOD) su 127.0.0.1:8765, o la prima porta libera dopo."""
+    folder = os.environ.get("VOD_LIBRARY") or os.path.expanduser("~/Movies/VOD")
+    for port in range(8765, 8775):
+        try:
+            httpd, lib = library_backend.start(folder, port)
+            return {"url": f"http://127.0.0.1:{port}", "lib": lib}
+        except OSError:
+            continue
+    return None
+
+
 class JsApi:
     """Funzioni chiamabili dall'interfaccia: window.pywebview.api.*"""
 
@@ -40,7 +53,9 @@ class JsApi:
 def main():
     updater.cleanup_old()
     token = secrets.token_urlsafe(24)
-    httpd, _ = server.start(os.path.join(data_dir(), "vod.db"), web_dir(), token)
+    library = start_library()
+    httpd, app = server.start(os.path.join(data_dir(), "vod.db"), web_dir(), token)
+    app.library = library
     url = f"http://127.0.0.1:{httpd.server_address[1]}/"
 
     if "--server-only" in sys.argv:   # per le prove senza finestra

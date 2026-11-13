@@ -59,6 +59,7 @@ class VodApp:
         self.sessions = {}          # token proxy -> contesto della riproduzione
         self.details = {}           # (profilo, slug) -> (istante, dettaglio)
         self.pool = ThreadPoolExecutor(max_workers=4)
+        self.library = None         # {"url", "lib"} impostato da main.py
 
     # ---------- profilo attivo ----------
 
@@ -475,6 +476,16 @@ def route_api(app, method, route, a):
     if route == "history/clear":
         app.require_adult()
         app.db.clear_history(a["id"])
+        return {"ok": True}
+    if route == "library/info":
+        if not app.library:
+            return {"available": False}
+        return {"available": True, "url": app.library["url"], **app.library["lib"].info()}
+    if route == "library/open":
+        app.require_adult()
+        if app.library:
+            import subprocess
+            subprocess.Popen(["open", app.library["lib"].folder])
         return {"ok": True}
     if route == "update/status":
         return updater.status()

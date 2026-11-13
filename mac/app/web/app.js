@@ -293,12 +293,18 @@ function posterHtml({ title, image, meta, metaOk, progress, href, act, i, slug, 
 function renderBrowse(kind) {
   const b = (S.browse[kind] = S.browse[kind] || { q: '', results: [], info: {} });
   const title = kind === 'movie' ? 'Film' : kind === 'series' ? 'Serie TV' : 'Ricerca';
-  app.innerHTML = shell(kind === 'all' ? '' : kind, `<div id="browse"></div>`, { searchKind: kind, query: b.q });
+  app.innerHTML = shell(kind === 'all' ? '' : kind, `<div id="browse"></div>`, { searchKind: kind, query: b.q === '*' ? '' : b.q });
   bindShell(kind);
   paintBrowse(kind, title);
   const input = document.getElementById('search');
   if (!b.searched) input.focus();
   if (b.q && !b.searched) runSearch(kind);
+  else if (!b.q && !b.searched && !b.triedAll) {
+    // Elenco completo, se il server lo supporta (la libreria del Mac sì): la ricerca vuota resta disponibile
+    b.triedAll = true;
+    b.q = '*';
+    runSearch(kind, true);
+  }
 }
 
 function visible(kind) {
@@ -320,7 +326,7 @@ function paintBrowse(kind, title) {
   let status = '';
   if (b.loading) status = 'Cerco…';
   else if (pending) status = b.kid ? `Controllo i titoli adatti ai bambini… (${pending})` : `Riconosco film e serie… (${pending})`;
-  else if (b.searched) status = `${items.length} risultati per «${b.q}»`;
+  else if (b.searched) status = b.showingAll ? `${items.length} titoli` : `${items.length} risultati per «${b.q}»`;
 
   let body;
   if (b.kidNeedsTmdb) body = empty('Il profilo bambini mostra solo titoli verificati con TMDB. Chiedi a un adulto di inserire la chiave TMDB per questo profilo nelle Impostazioni.');
@@ -340,15 +346,17 @@ function paintBrowse(kind, title) {
     ${body}`;
 }
 
-async function runSearch(kind) {
+async function runSearch(kind, quietAll) {
   const b = S.browse[kind];
   if (!b.q) return;
+  b.showingAll = !!quietAll;
   const seq = (b.seq = (b.seq || 0) + 1);
   Object.assign(b, { loading: true, error: null, info: {}, pending: 0 });
   paintBrowse(kind);
   try {
     const r = await api('search', { q: b.q });
     if (seq !== b.seq) return;
+    if (quietAll && !r.results.length) { Object.assign(b, { loading: false, q: '', showingAll: false }); paintBrowse(kind); return; }
     Object.assign(b, { loading: false, searched: true, results: r.results, kid: r.kid, kidNeedsTmdb: r.kidNeedsTmdb });
     for (const x of r.results) if (x.kidSafe !== null && x.kidSafe !== undefined) b.info[x.slug] = { kidSafe: x.kidSafe };
     paintBrowse(kind);
@@ -366,6 +374,7 @@ async function runSearch(kind) {
     paintBrowse(kind);
   } catch (e) {
     if (seq !== b.seq) return;
+    if (quietAll) { Object.assign(b, { loading: false, q: '', showingAll: false }); paintBrowse(kind); return; }
     Object.assign(b, { loading: false, searched: true, error: e.message, pending: 0 });
     paintBrowse(kind);
   }
@@ -697,6 +706,7 @@ async function openRsi(i) {
 async function renderSettings() {
   if (isKid()) { location.hash = '#/home'; return; }
   await refreshState();
+  try { S.library = await api('library/info'); } catch { S.library = null; }
   if (!S.update) S.update = await api('update/status');
   const profiles = S.state.profiles;
   if (!profiles.some((p) => p.id === S.settingsEditing)) S.settingsEditing = S.state.activeId;
@@ -734,10 +744,27 @@ async function renderSettings() {
           ${p.id !== S.state.activeId ? '<button class="btn danger" data-act="delete-profile" style="margin-left:auto">Elimina profilo</button>' : ''}
         </div>
         <p class="feedback" id="feedback"></p>
+        ${libraryCard(p)}
         ${updateCard()}
       </div>
     </div>`);
   bindShell();
+}
+
+function libraryCard(p) {
+  const L = S.library;
+  if (!L?.available) return '';
+  const inUse = p.baseUrl === L.url;
+  return `<section class="card" aria-labelledby="lib-t">
+      <p class="label-up" id="lib-t">Libreria del Mac</p>
+      <p style="margin:0">I tuoi video nella cartella <b>${esc(L.folder.replace(/^\/Users\/[^/]+/, '~'))}</b>: ${L.movies} film e ${L.series} serie.</p>
+      <p class="hint" style="margin:0">File .mp4, .m4v, .mov o .m3u8. Nomi come «Titolo (2010).mp4» per i film e «Serie/S01E01.mp4» per le serie; trovi le istruzioni nel file LEGGIMI della cartella.</p>
+      <div class="actions">
+        ${inUse ? '<span class="hint" style="color:var(--watched);align-self:center">✓ Questo profilo usa la libreria</span>'
+                : '<button class="btn primary" data-act="use-library">Usa la libreria per questo profilo</button>'}
+        <button class="btn" data-act="open-library">Apri la cartella</button>
+      </div>
+    </section>`;
 }
 
 function updateCard() {
@@ -994,6 +1021,11 @@ document.addEventListener('click', async (e) => {
         S.settingsEditing = S.state.activeId;
         await renderSettings();
         return feedback('Profilo eliminato.');
+      case 'use-library':
+        document.getElementById('f-base').value = S.library.url;
+        await saveProfile();
+        return feedback('Fatto: questo profilo ora mostra i video della libreria. Il dominio iframe può restare vuoto.');
+      case 'open-library': return api('library/open');
       case 'update-check': S.update = { ...S.update, phase: 'checking' }; paintUpdate(); S.update = await api('update/check'); return paintUpdate();
       case 'update-download': S.update = await api('update/download'); paintUpdate(); return updateLoop();
       case 'restart': return restartCountdown(true);
